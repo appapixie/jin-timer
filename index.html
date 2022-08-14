@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title> 진 힐라 타이머 </title>
+    <script src='https://cdn.jsdelivr.net/gh/naptha/tesseract.js@v1.0.14/dist/tesseract.min.js'></script>
+    <script async src="https://docs.opencv.org/3.4/opencv.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
+    <style>
+        * {
+            font-family: 'Jua', sans-serif;
+            box-sizing: border-box;
+        }
+
+        .select input[type=radio]{
+            display: none;
+        }
+        .select input[type=radio]+label{
+            display: inline-block;
+            cursor: pointer;
+            height: 34px;
+            width: 104px;
+            border: 1px solid #333;
+            line-height: 34px;
+            text-align: center;
+            font-size:14px;
+            margin-bottom: 7px;
+        }
+        .select input[type=radio]+label{
+            background-color: #fff;
+            color: #333;
+        }
+        .select input[type=radio]:checked+label{
+            background-color: #333;
+            color: #fff;
+        }
+    </style>
+</head>
+
+<body>
+    <div>
+      <button id="start" style="width: 105px; height: 34px; margin-bottom: 7px;"> 타이머 시작 </button>
+      <button id="stop" style="width: 105px; height: 34px;"> 타이머 중지 </button> <br>
+    </div>
+
+
+    <div class="select">
+        <input type="radio" checked="checked" id="select" name="shop" onclick="nomarl()"><label for="select"> 노말 </label>
+        <input type="radio" id="select2" name="shop" onclick="hard()"><label for="select2"> 하드 </label>
+    </div>
+
+    <div>
+        <button id="btn" style="width: 105px; height: 34px; margin-bottom: 7px;" onclick="p1()"> +1초 </button>
+        <button id="btn" style="width: 105px; height: 34px;" onclick="m1()"> -1초 </button> <br>
+        <button id="btn" style="width: 105px; height: 34px; margin-bottom: 7px;" onclick="p2()"> +2초 </button>
+        <button id="btn" style="width: 105px; height: 34px;" onclick="m2()"> -2초 </button> <br>
+    </div>
+
+
+    <span> 첫 낫 베기 시간 설정 :  </span> 
+    <input id="first" type="number" value="196" min="1" max="250" style="width: 50px; margin-top: 15px; text-align: center;">
+
+    <div id="boss" style="margin-top: 15px;"> 보스 체력 : ??%</div>
+    <div id="timer"> 낫 베기 : 0분 0초 </div>
+    <div id="phase"> 0 페이즈 적용 중 </div>
+    <canvas id="canvas" width="1366" height="768" hidden></canvas>
+    <video id="screen_video" width="300" height="150" autoplay hidden></video><br>
+
+    <script src="https://webrtc.github.io/adapter/adapter-latest.js"></script>
+</body>
+
+<script>
+    // video
+    const videoElem = document.getElementById("screen_video");
+    const startElem = document.getElementById("start");
+    const stopElem = document.getElementById("stop");
+
+    // canvas 
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    // snapShot
+    var snapStop = false
+
+    // regexp
+    var regex = /[^0-9.]/g;
+
+    // timer
+    var time = 0;
+    var nextTime = 0;
+    var min = 0; 
+    var sec = 0;
+
+
+    // 라디오버튼 노말
+    function nomarl() {
+        document.getElementById("first").value = 196;
+        nextTime = 180;
+    }
+
+    // 라디오버튼 하드
+    function hard() {
+        document.getElementById("first").value = 166;
+        nextTime = 150;
+    }
+
+    // 낫 베기 타이머
+    function scytheTimer() {
+        var sTimer = setInterval(function() {
+            if (snapStop) {
+                updateTime()
+                time--;
+
+                // 30초 비프음
+                if (time == 29) {
+                    function beep() {
+                        var snd = new Audio("data:audio/wav;base64,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qJrx4KOQjahZxWbcZgztj2c49nKmkId44S71j0c8eV9yDK6uPRzx5X18eDvjvQ6yKo9ZSS6l//8elePK/Lf//IInrOF/FvDoADYAGBMGb7FtErm5MXMlmPAJQVgWta7Zx2go+8xJ0UiCb8LHHdftWyLJE0QIAIsI+UbXu67dZMjmgDGCGl1H+vpF4NSDckSIkk7Vd+sxEhBQMRU8j/12UIRhzSaUdQ+rQU5kGeFxm+hb1oh6pWWmv3uvmReDl0UnvtapVaIzo1jZbf/pD6ElLqSX+rUmOQNpJFa/r+sa4e/pBlAABoAAAAA3CUgShLdGIxsY7AUABPRrgCABdDuQ5GC7DqPQCgbbJUAoRSUj+NIEig0YfyWUho1VBBBA//uQZB4ABZx5zfMakeAAAAmwAAAAF5F3P0w9GtAAACfAAAAAwLhMDmAYWMgVEG1U0FIGCBgXBXAtfMH10000EEEEEECUBYln03TTTdNBDZopopYvrTTdNa325mImNg3TTPV9q3pmY0xoO6bv3r00y+IDGid/9aaaZTGMuj9mpu9Mpio1dXrr5HERTZSmqU36A3CumzN/9Robv/Xx4v9ijkSRSNLQhAWumap82WRSBUqXStV/YcS+XVLnSS+WLDroqArFkMEsAS+eWmrUzrO0oEmE40RlMZ5+ODIkAyKAGUwZ3mVKmcamcJnMW26MRPgUw6j+LkhyHGVGYjSUUKNpuJUQoOIAyDvEyG8S5yfK6dhZc0Tx1KI/gviKL6qvvFs1+bWtaz58uUNnryq6kt5RzOCkPWlVqVX2a/EEBUdU1KrXLf40GoiiFXK///qpoiDXrOgqDR38JB0bw7SoL+ZB9o1RCkQjQ2CBYZKd/+VJxZRRZlqSkKiws0WFxUyCwsKiMy7hUVFhIaCrNQsKkTIsLivwKKigsj8XYlwt/WKi2N4d//uQRCSAAjURNIHpMZBGYiaQPSYyAAABLAAAAAAAACWAAAAApUF/Mg+0aohSIRobBAsMlO//Kk4soosy1JSFRYWaLC4qZBYWFRGZdwqKiwkNBVmoWFSJkWFxX4FFRQWR+LsS4W/rFRb/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////VEFHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAU291bmRib3kuZGUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMjAwNGh0dHA6Ly93d3cuc291bmRib3kuZGUAAAAAAAAAACU=");  
+                        snd.play();
+                    }
+                    beep();
+                }
+
+                // 15초 남았을때 색이 바뀜
+                if (time < 15) {
+                    var x = Math.floor(Math.random() * 256);
+                    var y = Math.floor(Math.random() * 256);
+                    var z = Math.floor(Math.random() * 256);
+                    var bgColor = "rgb(" + x + "," + y + "," + z + ")";
+                    document.body.style.background = bgColor;
+                }
+
+                // 0초 다음 낫 주기
+                if (time < 0) {
+                    time = nextTime;
+                    document.body.style.background = "rgb(255, 255, 255)";
+                }
+            } else {
+                clearInterval(sTimer)
+            }
+
+        }, 1000);
+    }
+
+    // +1초
+    function p1(){
+        time = time + 1
+        updateTime()
+    }
+
+    // +2초
+    function p2(){
+        time = time + 2
+        updateTime()
+    }
+
+    // -1초
+    function m1(){
+        time = time - 1
+        updateTime()
+    }
+
+    // -2초
+    function m2(){
+        time = time - 2
+        updateTime()
+    }
+
+    // 시간 업데이트
+    function updateTime() {
+        min = parseInt(time / 60);
+        sec = time % 60;
+        document.getElementById("timer").innerHTML = "낫 베기 : " + min + "분 " + sec + "초";
+    }
+
+    var displayMediaOptions = {
+    video: {
+        cursor: "always"
+        },
+        audio: false
+    };
+
+    // webRTC start
+    function startCapture() {
+        navigator.mediaDevices.getDisplayMedia(displayMediaOptions)
+            .then((stream) => {
+                videoElem.srcObject = stream
+                videoElem.onloadedmetadata = () => {
+                videoElem.play()
+            }
+            snapStop = true
+            time = document.getElementById('first').value;
+            if (document.getElementById("select").checked) {
+                nextTime = 180
+            } else {
+                nextTime = 150
+            }
+            scytheTimer()
+            document.getElementById('start').disabled = true;
+            document.getElementById('select').disabled = true;
+            document.getElementById('select2').disabled = true;
+            
+
+            var snapShot = setInterval(function() {
+                if (snapStop) {
+                    // 필터
+                    ctx.filter = 'blur(0.1px) grayscale(100) invert(100) brightness(1) contrast(100)'
+                    ctx.fillStyle = "rgba(255, 255, 255, 255)";
+                    ctx.fillRect(0, 0, 111, 150);
+                    ctx.drawImage(videoElem, 284, 63, 37, 18, 1, 1, 110, 71);
+                    const img = canvas.toDataURL("image/png");
+
+
+                    // OCR         
+                    Tesseract.recognize(img, {
+                        lang: 'eng'
+                    })
+                    .then(function(result){
+                        console.log(result.text)
+                        var result = parseFloat(result.text.replace(regex, ""));
+                        if (isNaN(result)){
+                            result = "??"
+                        }
+                        document.getElementById("boss").innerHTML = "보스 체력 : " + result + "%"
+
+                        // 진 힐라 체력비례 시간 변동 
+                        if (document.getElementById("select").checked) {
+
+                            if (result >= 51) { // 노말
+                                document.getElementById("phase").innerHTML = "1 페이즈 적용 중 (150초)";
+                                nextTime = 180
+                            } else if (result >= 0) {
+                                document.getElementById("phase").innerHTML = "2 페이즈 적용 중 (125초)";
+                                nextTime = 150
+                            } else if (isNaN(result)) {
+                                document.getElementById("phase").innerHTML = "0 페이즈 적용 중";
+                            }
+                        } else {
+
+                            if (result >= 61) { // 하드
+                                document.getElementById("phase").innerHTML = "1 페이즈 적용 중 (150초)";
+                                nextTime = 150
+                            } else if (result >= 31) {
+                                document.getElementById("phase").innerHTML = "2 페이즈 적용 중 (125초)";
+                                nextTime = 125
+                            } else if (result >= 0) {
+                                document.getElementById("phase").innerHTML = "3 페이즈 적용 중 (100초)";
+                                nextTime = 100
+                            } else if (isNaN(result)) {
+                                document.getElementById("phase").innerHTML = "0 페이즈 적용 중";
+                            }
+                        }
+                    })
+
+                } else {
+                   clearInterval(snapShot)
+                }
+            }, 300);
+        });
+    }
+
+    // webRTC stop
+    function stopCapture(evt) {
+        let tracks = videoElem.srcObject.getTracks();
+        tracks.forEach(track => track.stop());
+        videoElem.srcObject = null;
+        snapStop = false
+        time = 0;
+        nextTime = 0;
+        min = 0; 
+        sec = 0;
+        ctx.clearRect(0, 0, 1366, 768);
+        document.getElementById("boss").innerHTML = "보스 체력 : ??%";
+        document.getElementById("timer").innerHTML = "낫 베기 : 0분 0초";
+        document.getElementById("phase").innerHTML = "0 페이즈 적용 중";
+        document.getElementById('start').disabled = false;
+        document.getElementById('select').disabled = false;
+        document.getElementById('select2').disabled = false;
+    }
+
+    startElem.addEventListener("click", function(evt) { startCapture(); }, false);
+    stopElem.addEventListener("click", function(evt)  { stopCapture();  }, false);
+</script>
+
+</html>
